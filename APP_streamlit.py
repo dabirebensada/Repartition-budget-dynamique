@@ -18,13 +18,6 @@ histo_file = st.sidebar.file_uploader("Fichier Historique (CSV)", type="csv")
 budget_file = st.sidebar.file_uploader("Fichier Budget alloué (CSV)", type="csv")
 annee_cible = st.sidebar.number_input("Année cible", min_value=2022, value=2025)
 
-# --- Réinitialisation ---
-def reset_app():
-    st.session_state.clear()
-
-if st.sidebar.button("🔄 Réinitialiser"):
-    reset_app()
-    st.experimental_rerun()
 
 # --- Fonction de nettoyage des catégories ---
 def nettoyer_categorie(cat):
