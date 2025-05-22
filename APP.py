@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -135,7 +134,7 @@ if histo_file and budget_file:
         "Montant": total_par_categorie.values
     })
 
-    fig3, ax3 = plt.subplots(figsize=(18, 7))
+    fig3, ax3 = plt.subplots(figsize=(20, 7))
 
     palette = sns.color_palette("Set2", n_colors=len(df_bar))
 

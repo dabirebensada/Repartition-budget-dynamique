@@ -1,15 +1,12 @@
-#!/usr/bin/env python VERSION TEST 0.0.1
-# coding: utf-8
-
-# In[ ]:
-
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import unicodedata
+import plotly.express as px
+from io import BytesIO
+from st_aggrid import AgGrid, GridOptionsBuilder
 
 # --- Configuration de la page ---
 st.set_page_config(page_title="Répartition Budgétaire", layout="wide")
@@ -56,144 +53,119 @@ def nettoyer_categorie(cat):
 
 # --- Traitement principal ---
 if histo_file and budget_file:
-    df_histo = pd.read_csv(histo_file, sep=";", encoding="utf-8")
-    df_budget = pd.read_csv(budget_file, sep=";", encoding="utf-8")
+    with st.spinner("🔍 Traitement des données en cours..."):
+        df_histo = pd.read_csv(histo_file, sep=";", encoding="utf-8")
+        df_budget = pd.read_csv(budget_file, sep=";", encoding="utf-8")
 
-    df_histo.columns = df_histo.columns.str.strip()
-    df_histo["Montant"] = pd.to_numeric(df_histo["Montant"], errors="coerce").fillna(0)
-    df_histo["Categorie"] = df_histo["Categorie"].apply(nettoyer_categorie)
-    df_budget["Categorie"] = df_budget["Categorie"].apply(nettoyer_categorie)
+        st.subheader("📄 Aperçu des fichiers")
+        with st.expander("Aperçu - Historique"):
+            st.dataframe(df_histo.head())
+        with st.expander("Aperçu - Budget"):
+            st.dataframe(df_budget.head())
 
-    mois_order = ["janv", "fev", "mar", "avr", "mai", "juin", "juill", "aout", "sep", "oct", "nov", "dec"]
-    df_histo = df_histo[df_histo["Mois"].isin(mois_order)]
-    df_histo["Mois"] = pd.Categorical(df_histo["Mois"], categories=mois_order, ordered=True)
+        df_histo.columns = df_histo.columns.str.strip()
+        df_histo["Montant"] = pd.to_numeric(df_histo["Montant"], errors="coerce").fillna(0)
+        df_histo["Categorie"] = df_histo["Categorie"].apply(nettoyer_categorie)
+        df_budget["Categorie"] = df_budget["Categorie"].apply(nettoyer_categorie)
 
-    annees_historiques = [annee_cible - 3, annee_cible - 2, annee_cible - 1]
-    histo_filtre = df_histo[df_histo["Annee"].isin(annees_historiques)]
+        mois_order = ["janv", "fev", "mar", "avr", "mai", "juin", "juill", "aout", "sep", "oct", "nov", "dec"]
+        df_histo = df_histo[df_histo["Mois"].isin(mois_order)]
+        df_histo["Mois"] = pd.Categorical(df_histo["Mois"], categories=mois_order, ordered=True)
 
-    pivot = histo_filtre.pivot_table(index="Mois", columns="Categorie", values="Montant",
-                                     aggfunc="mean", fill_value=0, observed=False)
-    total_annuel = pivot.sum(axis=0)
-    df_ratios = pivot.divide(total_annuel, axis=1).fillna(0)
+        annees_historiques = [annee_cible - 3, annee_cible - 2, annee_cible - 1]
+        histo_filtre = df_histo[df_histo["Annee"].isin(annees_historiques)]
 
-    with st.expander("📌 Moyennes mensuelles par catégorie"):
-        st.dataframe(pivot.round(2))
+        pivot = histo_filtre.pivot_table(index="Mois", columns="Categorie", values="Montant",
+                                         aggfunc="mean", fill_value=0, observed=False)
+        total_annuel = pivot.sum(axis=0)
+        df_ratios = pivot.divide(total_annuel, axis=1).fillna(0)
 
-    with st.expander("📌 Ratios mensuels (poids par mois)"):
-        st.dataframe(df_ratios.round(4))
+        # --- Calcul répartition ---
+        repartition = pd.DataFrame(index=mois_order)
+        for _, row in df_budget.iterrows():
+            cat = row["Categorie"]
+            budget = row["Budget_Alloue"]
+            if cat in df_ratios.columns:
+                repartition[cat] = df_ratios[cat] * budget
+            else:
+                repartition[cat] = 0
 
-    repartition = pd.DataFrame(index=mois_order)
-    for _, row in df_budget.iterrows():
-        cat = row["Categorie"]
-        budget = row["Budget_Alloue"]
-        if cat in df_ratios.columns:
-            repartition[cat] = df_ratios[cat] * budget
-        else:
-            repartition[cat] = 0
+        repartition.index.name = "Mois"
+        repartition = repartition.reset_index()
+        df_resultat = pd.melt(repartition, id_vars="Mois", var_name="Categorie", value_name=f"Montant_{annee_cible}")
+        df_resultat["Categorie"] = df_resultat["Categorie"].apply(nettoyer_categorie)
 
-    repartition.index.name = "Mois"
-    repartition = repartition.reset_index()
-    df_resultat = pd.melt(repartition, id_vars="Mois", var_name="Categorie", value_name=f"Montant_{annee_cible}")
-    df_resultat["Categorie"] = df_resultat["Categorie"].apply(nettoyer_categorie)
+        # --- Moyennes et écarts ---
+        historique_moyenne = pivot.stack().reset_index().rename(columns={0: "Montant_Moyenne"})
+        comparaison = df_resultat.merge(historique_moyenne, on=["Mois", "Categorie"], how="left")
+        comparaison["Ecart"] = comparaison[f"Montant_{annee_cible}"] - comparaison["Montant_Moyenne"]
 
-    with st.expander(f"📌 Répartition Budget {annee_cible}"):
-        st.dataframe(df_resultat.round(2))
+        # --- Organisation par onglets ---
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📋 Tableaux", "📈 Graphiques", "📊 Totaux", "📥 Export", "⚙️ Paramètres"])
 
-    historique_moyenne = pivot.stack().reset_index().rename(columns={0: "Montant_Moyenne"})
-    comparaison = df_resultat.merge(historique_moyenne, on=["Mois", "Categorie"], how="left")
-    comparaison["Ecart"] = comparaison[f"Montant_{annee_cible}"] - comparaison["Montant_Moyenne"]
+        with tab1:
+            st.subheader("📌 Moyennes mensuelles par catégorie")
+            AgGrid(pivot.round(2))
 
-    with st.expander(f"📌 Tableau des écarts ({annee_cible} vs Moyenne historique)"):
-        st.dataframe(comparaison.round(2))
+            st.subheader("📌 Ratios mensuels")
+            AgGrid(df_ratios.round(4))
 
-    # --- Graphique Comparatif ---
-    st.subheader("📈 Comparaison graphique avec les années précédentes")
-    categorie_select = st.selectbox("Choisissez une catégorie", df_resultat["Categorie"].unique())
-    temp_resultat = df_resultat[df_resultat["Categorie"] == categorie_select].set_index("Mois")
-    temp_moy = historique_moyenne[historique_moyenne["Categorie"] == categorie_select].set_index("Mois")
+            st.subheader(f"📌 Répartition Budget {annee_cible}")
+            AgGrid(df_resultat.round(2))
 
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(temp_resultat.index, temp_resultat[f"Montant_{annee_cible}"], label=str(annee_cible), marker="o")
-    ax.plot(temp_moy.index, temp_moy["Montant_Moyenne"], label="Moyenne sur 3 ans", linestyle="--")
-    ax.set_title(f"Comparaison - {categorie_select}")
-    ax.legend()
-    st.pyplot(fig)
+            st.subheader("📌 Tableau des écarts")
+            AgGrid(comparaison.round(2))
 
-    # --- Total mensuel toutes catégories ---
-    repartition["Total_Mensuel"] = repartition.drop(columns=["Mois"]).sum(axis=1)
-    total_par_categorie = repartition.drop(columns=["Mois", "Total_Mensuel"]).sum()
-    total_general_annuel = total_par_categorie.sum()
+        with tab2:
+            st.subheader("📈 Comparaison graphique")
+            categories = st.multiselect("Choisissez une ou plusieurs catégories", df_resultat["Categorie"].unique())
+            for cat in categories:
+                temp_resultat = df_resultat[df_resultat["Categorie"] == cat]
+                temp_moy = historique_moyenne[historique_moyenne["Categorie"] == cat]
+                fig = px.line(temp_resultat, x="Mois", y=f"Montant_{annee_cible}", title=f"{cat} - {annee_cible}", markers=True)
+                fig.add_scatter(x=temp_moy["Mois"], y=temp_moy["Montant_Moyenne"], mode="lines", name="Moyenne 3 ans")
+                st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("📊 Total mensuel toutes catégories confondues")
-    fig2, ax2 = plt.subplots(figsize=(14, 7))
-    bars = sns.barplot(data=repartition, x="Mois", y="Total_Mensuel", color="skyblue", ax=ax2)
-    ax2.set_title(f"Total mensuel - {annee_cible}")
-    for container in bars.containers:
-        bars.bar_label(container, fmt='%.0f', label_type='edge', fontsize=8)
-    st.pyplot(fig2)
+        with tab3:
+            repartition["Total_Mensuel"] = repartition.drop(columns=["Mois"]).sum(axis=1)
+            total_par_categorie = repartition.drop(columns=["Mois", "Total_Mensuel"]).sum()
+            total_general_annuel = total_par_categorie.sum()
 
-    # --- Totaux annuels par catégorie ---
-    st.subheader("📉 Totaux annuels par catégorie")
+            st.subheader("📊 Total mensuel")
+            fig2 = px.bar(repartition, x="Mois", y="Total_Mensuel", title="Total mensuel toutes catégories")
+            st.plotly_chart(fig2, use_container_width=True)
 
-    df_bar = pd.DataFrame({
-        "Categorie": total_par_categorie.index,
-        "Montant": total_par_categorie.values
-    })
+            st.subheader("📉 Totaux annuels par catégorie")
+            df_bar = pd.DataFrame({"Categorie": total_par_categorie.index, "Montant": total_par_categorie.values})
+            fig3 = px.bar(df_bar, x="Categorie", y="Montant", color="Categorie", title="Totaux annuels")
+            st.plotly_chart(fig3, use_container_width=True)
 
-    fig3, ax3 = plt.subplots(figsize=(18, 7))
+            st.subheader("📊 Répartition annuelle en %")
+            pourcentages = (total_par_categorie / total_general_annuel * 100).round(2)
+            fig4 = px.pie(values=pourcentages.values, names=pourcentages.index, title="Répartition annuelle en %")
+            st.plotly_chart(fig4)
 
-    palette = sns.color_palette("Set2", n_colors=len(df_bar))
+        with tab4:
+            df_resultat["Annee"] = annee_cible
+            df_export = df_resultat.rename(columns={f"Montant_{annee_cible}": "Montant"})
+            df_export["Montant"] = df_export["Montant"].astype(float)
+            df_histo_update = pd.concat([df_histo, df_export], ignore_index=True)
 
-    bars = sns.barplot(data=df_bar, x="Categorie", y="Montant", ax=ax3, color=None)
+            buffer = BytesIO()
+            with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                pivot.to_excel(writer, sheet_name="Moyennes")
+                df_ratios.to_excel(writer, sheet_name="Ratios")
+                df_resultat.to_excel(writer, sheet_name="Répartition")
+                comparaison.to_excel(writer, sheet_name="Écarts")
+            st.download_button("📥 Télécharger le fichier Excel complet", data=buffer.getvalue(), file_name=f"budget_{annee_cible}.xlsx")
 
-    for bar, color in zip(bars.patches, palette):
-        bar.set_color(color)
+        with tab5:
+            st.markdown("**Années utilisées pour les moyennes :**")
+            st.write(annees_historiques)
 
-    ax3.set_title(f"Totaux annuels par catégorie - {annee_cible}")
-
-    for bar in bars.patches:
-        height = bar.get_height()
-        ax3.annotate(f"{height:,.0f}",
-                     xy=(bar.get_x() + bar.get_width() / 2, height),
-                     xytext=(0, 5),
-                     textcoords="offset points",
-                     ha="center", fontsize=9)
-
-    st.pyplot(fig3)
-
-    # --- Répartition annuelle en pourcentage ---
-    st.subheader("📊 Répartition annuelle en pourcentage par catégorie")
-    pourcentages = (total_par_categorie / total_general_annuel * 100).round(2)
-    fig4, ax4 = plt.subplots(figsize=(8, 8))
-    ax4.pie(pourcentages.values, labels=pourcentages.index, autopct='%1.1f%%',
-            startangle=90, colors=sns.color_palette("pastel"))
-    ax4.axis('equal')
-    ax4.set_title(f"Répartition annuelle {annee_cible} - Pourcentage par catégorie")
-    st.pyplot(fig4)
-
-    st.success(f"✅ Analyse terminée pour l'année {annee_cible}. Total annuel général : {total_general_annuel:,.0f} FCFA")
-
-    # --- Export des résultats ---
-    df_resultat["Annee"] = annee_cible
-    df_export = df_resultat.rename(columns={f"Montant_{annee_cible}": "Montant"})
-    df_export["Categorie"] = df_export["Categorie"].apply(nettoyer_categorie)
-    df_export["Montant"] = df_export["Montant"].astype(float)
-
-    df_histo_update = pd.concat([df_histo, df_export], ignore_index=True)
-    df_histo_update["Categorie"] = df_histo_update["Categorie"].apply(nettoyer_categorie)
-    df_histo_update["Montant"] = df_histo_update["Montant"].astype(float)
-
-    with st.expander("📄 Exporter les résultats"):
-        st.download_button(f"Télécharger la répartition {annee_cible} (CSV)",
-                           data=df_export.to_csv(index=False, sep=';', encoding='utf-8-sig'),
-                           file_name=f"repartition_{annee_cible}.csv",
-                           mime='text/csv')
-
-        st.download_button("Télécharger l'historique mis à jour (CSV)",
-                           data=df_histo_update.to_csv(index=False, sep=';', encoding='utf-8-sig'),
-                           file_name="historique_maj.csv",
-                           mime='text/csv')
+    st.success(f"✅ Analyse terminée pour l'année {annee_cible}. Total général : {total_general_annuel:,.0f} FCFA")
 
 else:
     st.info("📥 Veuillez charger les deux fichiers CSV dans la barre latérale pour lancer l'analyse.")
+
 
