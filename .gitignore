@@ -1,0 +1,10 @@
+# .gitignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.DS_Store
+*.csv
+*.xlsx
+*.log

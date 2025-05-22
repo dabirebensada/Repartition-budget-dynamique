@@ -1,0 +1,3 @@
+Concertir mon fichier .ipynb en .py =  jupyter nbconvert --to script APP.ipynb 
+
+exécuter = streamlit run APP_streamlit.py
