@@ -10,7 +10,7 @@ from st_aggrid import AgGrid, GridOptionsBuilder
 
 # --- Configuration de la page ---
 st.set_page_config(page_title="Répartition Budgétaire", layout="wide")
-st.title("📊 Planification - Répartition Budgétaire SUNU IARD BF")
+st.title("📊 Mensualisation Budgétaire SUNU IARD BF")
 
 # --- Barre latérale ---
 st.sidebar.header("📁 Données à charger")
